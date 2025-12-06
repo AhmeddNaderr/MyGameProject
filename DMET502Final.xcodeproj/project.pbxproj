@@ -6,6 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		074423C52EDF68AC000613AD /* OpenGL.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 074423C42EDF68AC000613AD /* OpenGL.framework */; };
+		074423C72EDF68B7000613AD /* GLUT.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 074423C62EDF68B7000613AD /* GLUT.framework */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXCopyFilesBuildPhase section */
 		074423B72EDF684A000613AD /* CopyFiles */ = {
 			isa = PBXCopyFilesBuildPhase;
@@ -20,6 +25,8 @@
 
 /* Begin PBXFileReference section */
 		074423B92EDF684A000613AD /* DMET502Final */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = DMET502Final; sourceTree = BUILT_PRODUCTS_DIR; };
+		074423C42EDF68AC000613AD /* OpenGL.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = OpenGL.framework; path = System/Library/Frameworks/OpenGL.framework; sourceTree = SDKROOT; };
+		074423C62EDF68B7000613AD /* GLUT.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = GLUT.framework; path = System/Library/Frameworks/GLUT.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -35,6 +42,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				074423C72EDF68B7000613AD /* GLUT.framework in Frameworks */,
+				074423C52EDF68AC000613AD /* OpenGL.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -45,6 +54,7 @@
 			isa = PBXGroup;
 			children = (
 				074423BB2EDF684A000613AD /* DMET502Final */,
+				074423C32EDF68AB000613AD /* Frameworks */,
 				074423BA2EDF684A000613AD /* Products */,
 			);
 			sourceTree = "<group>";
@@ -55,6 +65,15 @@
 				074423B92EDF684A000613AD /* DMET502Final */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		074423C32EDF68AB000613AD /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				074423C62EDF68B7000613AD /* GLUT.framework */,
+				074423C42EDF68AC000613AD /* OpenGL.framework */,
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -93,6 +112,7 @@
 				TargetAttributes = {
 					074423B82EDF684A000613AD = {
 						CreatedOnToolsVersion = 26.1.1;
+						LastSwiftMigration = 2610;
 					};
 				};
 			};
@@ -244,16 +264,21 @@
 		074423C12EDF684A000613AD /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_STYLE = Automatic;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
 		};
 		074423C22EDF684A000613AD /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_STYLE = Automatic;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 6.0;
 			};
 			name = Release;
 		};
