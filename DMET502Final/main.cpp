@@ -1,776 +1,833 @@
-// DMET 502 - Computer Graphics Final Project
-// Generic 3D Game Engine Skeleton (macOS + OpenGL + GLUT)
-//
-// - Two levels (different layouts, colors, lights, textures)
-// - First-person & third-person cameras (switch with '1' and '3')
-// - Keyboard + mouse navigation
-// - Player, obstacles, collectibles
-// - Collision detection
-// - Textured environment (ground, walls, objects)
-// - Lighting with color changes + animated light source
-// - Score calculation displayed on screen
-// - Simple interaction animations (spinning coins, player reaction)
-//
-// NOTE:
-//  * This is a base engine. You MUST customize:
-//      - Theme, models (.3ds), textures, sounds
-//      - Level designs and goals
-//  * Texture loader here assumes 24-bit uncompressed BMP for simplicity.
-//    You can replace it with stb_image or SOIL if you prefer PNG/JPG.
-//
 
-#define GL_SILENCE_DEPRECATION   // silence macOS OpenGL deprecation warnings
-#include "ObjModel.h"
-ObjModel playerModel;
+// main.cpp — Full merged version with:
+// Level 1 Walls  → rock_boulder_cracked_diff_4k.bmp
+// Level 2 Walls  → jersey_melange_diff_4k.bmp
+// Level 1 Floor  → Ground095A_4K-JPG_Color.bmp
+// Level 2 Floor  → Snow008A_4K-JPG_Color.bmp
 
 #include <GLUT/glut.h>
-#include <OpenGL/gl.h>
-#include <OpenGL/glu.h>
-
 #include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
 #include <vector>
 #include <string>
+#include <fstream>
+#include <sstream>
+#include <iostream>
+#include <cstdlib>
+#include <ctime>
+#include <algorithm>
 
-// -----------------------------------------
-// Math helpers
-// -----------------------------------------
+// =======================================================
+// SIMPLE BMP TEXTURE LOADER
+// =======================================================
+GLuint loadBMP(const char *imagepath) {
+    unsigned char header[54];
+    unsigned int dataPos, width, height, imageSize;
 
-struct Vec3 {
-    float x, y, z;
-    Vec3(float X = 0, float Y = 0, float Z = 0) : x(X), y(Y), z(Z) {}
-    Vec3 operator+(const Vec3 &o) const { return Vec3(x + o.x, y + o.y, z + o.z); }
-    Vec3 operator-(const Vec3 &o) const { return Vec3(x - o.x, y - o.y, z - o.z); }
-    Vec3 operator*(float s) const { return Vec3(x * s, y * s, z * s); }
-};
-
-struct AABB {
-    Vec3 min, max;
-};
-
-// Simple AABB collision
-bool intersects(const AABB &a, const AABB &b) {
-    return (a.min.x <= b.max.x && a.max.x >= b.min.x) &&
-           (a.min.y <= b.max.y && a.max.y >= b.min.y) &&
-           (a.min.z <= b.max.z && a.max.z >= b.min.z);
-}
-
-// -----------------------------------------
-// Global state
-// -----------------------------------------
-
-int windowWidth  = 1280;
-int windowHeight = 720;
-
-float lastMouseX = windowWidth / 2.0f;
-float lastMouseY = windowHeight / 2.0f;
-bool  firstMouse = true;
-
-bool  keyStates[256]; // for smooth WASD
-
-// Game state
-enum LevelID { LEVEL_1 = 0, LEVEL_2 = 1 };
-LevelID currentLevel = LEVEL_1;
-
-int   score       = 0;
-bool  gameOver    = false;
-bool  firstPerson = true; // camera mode
-
-// Timing
-float deltaTime = 0.016f;
-float lastFrame = 0.0f;
-
-// -----------------------------------------
-// Texture helper (simple BMP loader)
-// -----------------------------------------
-
-GLuint loadBMPTexture(const char *filename) {
-    FILE *file = fopen(filename, "rb");
+    FILE *file = fopen(imagepath, "rb");
     if (!file) {
-        printf("Could not open texture file %s\n", filename);
+        std::cout << "ERROR: Cannot open BMP file: " << imagepath << "\n";
         return 0;
     }
 
-    unsigned char header[54];
-    fread(header, 1, 54, file);
-    if (header[0] != 'B' || header[1] != 'M') {
-        printf("Not a valid BMP file: %s\n", filename);
+    if (fread(header, 1, 54, file) != 54) {
+        std::cout << "ERROR: Not a valid BMP file.\n";
         fclose(file);
         return 0;
     }
 
-    unsigned int dataPos   = *(int*)&(header[0x0A]);
-    unsigned int imageSize = *(int*)&(header[0x22]);
-    unsigned int width     = *(int*)&(header[0x12]);
-    unsigned int height    = *(int*)&(header[0x16]);
+    if (header[0] != 'B' || header[1] != 'M') {
+        std::cout << "ERROR: Invalid BMP header.\n";
+        fclose(file);
+        return 0;
+    }
+
+    dataPos   = *(int*)&(header[0x0A]);
+    imageSize = *(int*)&(header[0x22]);
+    width     = *(int*)&(header[0x12]);
+    height    = *(int*)&(header[0x16]);
 
     if (imageSize == 0) imageSize = width * height * 3;
     if (dataPos == 0)   dataPos = 54;
 
     unsigned char *data = new unsigned char[imageSize];
-    fseek(file, dataPos, SEEK_SET);
     fread(data, 1, imageSize, file);
     fclose(file);
 
-    // OpenGL texture setup
-    GLuint textureID;
-    glGenTextures(1, &textureID);
-    glBindTexture(GL_TEXTURE_2D, textureID);
+    GLuint texID;
+    glGenTextures(1, &texID);
+    glBindTexture(GL_TEXTURE_2D, texID);
 
-    // BMP is BGR; tell OpenGL that
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB,
-                 width, height, 0, GL_BGR,
-                 GL_UNSIGNED_BYTE, data);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height,
+                 0, GL_BGR, GL_UNSIGNED_BYTE, data);
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
     delete[] data;
-    return textureID;
+    return texID;
 }
 
-// -----------------------------------------
-// Camera
-// -----------------------------------------
-
-struct Camera {
-    Vec3 pos;
-    float yaw;   // rotation around Y
-    float pitch; // rotation around X
-
-    Camera() {
-        pos   = Vec3(0.0f, 2.0f, 5.0f);
-        yaw   = -90.0f;
-        pitch = 0.0f;
-    }
-
-    Vec3 front() const {
-        float radYaw = yaw * (float)M_PI / 180.0f;
-        float radPit = pitch * (float)M_PI / 180.0f;
-        Vec3 dir;
-        dir.x = std::cos(radYaw) * std::cos(radPit);
-        dir.y = std::sin(radPit);
-        dir.z = std::sin(radYaw) * std::cos(radPit);
-        float len = std::sqrt(dir.x * dir.x + dir.y * dir.y + dir.z * dir.z);
-        return Vec3(dir.x / len, dir.y / len, dir.z / len);
-    }
-
-    Vec3 right() const {
-        Vec3 f = front();
-        Vec3 r(f.z, 0.0f, -f.x);
-        float len = std::sqrt(r.x * r.x + r.y * r.y + r.z * r.z);
-        return Vec3(r.x / len, r.y / len, r.z / len);
-    }
-
-    Vec3 up() const {
-        Vec3 f = front();
-        Vec3 r = right();
-        Vec3 u(r.y * f.z - r.z * f.y,
-               r.z * f.x - r.x * f.z,
-               r.x * f.y - r.y * f.x);
-        float len = std::sqrt(u.x * u.x + u.y * u.y + u.z * u.z);
-        return Vec3(u.x / len, u.y / len, u.z / len);
-    }
-
-    void apply() const {
-        Vec3 f = front();
-        Vec3 target = pos + f;
-        Vec3 u = up();
-        gluLookAt(pos.x, pos.y, pos.z,
-                  target.x, target.y, target.z,
-                  u.x, u.y, u.z);
-    }
+// =======================================================
+// BASIC MATH
+// =======================================================
+struct Vec3 { float x,y,z;
+    Vec3() : x(0),y(0),z(0) {}
+    Vec3(float X,float Y,float Z):x(X),y(Y),z(Z){}
 };
 
-Camera camera;
+inline float frand(float a,float b){
+    return a + (b-a) * (float(rand()) / float(RAND_MAX));
+}
+inline float len(const Vec3& v){
+    return std::sqrt(v.x*v.x + v.y*v.y + v.z*v.z);
+}
+inline float clampf(float v,float a,float b){
+    return v < a ? a : (v > b ? b : v);
+}
 
-// -----------------------------------------
-// Player
-// -----------------------------------------
+// =======================================================
+// GLOBAL VARIABLES
+// =======================================================
+const float WORLD_HALF  = 36.0f;
+const float WALL_HEIGHT = 7.0f;
 
-struct Player {
-    Vec3 pos;
-    float radius;
-    float speed;
-    float heading; // for drawing the player facing movement direction
+Vec3 playerPos(0,1.0f,0), lastSafePos(0,1.0f,0);
+float playerYaw=0, cameraYaw=0, playerPitch=0, cameraPitch=0;
 
-    Player() {
-        pos     = Vec3(0.0f, 0.5f, 0.0f);
-        radius  = 0.5f;
-        speed   = 5.0f;
-        heading = 0.0f;
-    }
+float lastTime=0, playerRadius=0.6f, playerSpeed=8.0f;
+bool keys[512]={false};
+int screenW=1280, screenH=800;
 
-    AABB bounds() const {
-        return { Vec3(pos.x - radius, 0.0f, pos.z - radius),
-                 Vec3(pos.x + radius, 1.0f, pos.z + radius) };
-    }
+enum CameraMode { CAM_THIRD, CAM_FIRST };
+CameraMode cameraMode = CAM_THIRD;
 
-    void draw() {
-        glPushMatrix();
-        glTranslatef(pos.x, pos.y, pos.z);
-        glRotatef(heading, 0, 1, 0);
-        glTranslatef(0.0f, -1.0f, 0.0f);   // lower the model
+int currentLevel = 1;
+int score = 0;
 
-        glScalef(0.01f, 0.01f, 0.01f);   // <--- VERY IMPORTANT
-        playerModel.draw();
-        glPopMatrix();
+// =======================================================
+// TEXTURES — ADDED FLOOR TEXTURES
+// =======================================================
+GLuint desertWallTex = 0;     // Level 1 walls
+GLuint snowWallTex   = 0;     // Level 2 walls
+GLuint desertFloorTex = 0;    // Level 1 floor
+GLuint snowFloorTex   = 0;    // Level 2 floor
 
-    }
-
-
-
+// =======================================================
+// SIMPLE OBJ LOADER
+// =======================================================
+struct Vec3s { float x,y,z; };
+struct Mesh {
+    std::vector<Vec3s> verts;
+    bool empty()const{return verts.empty();}
 };
+Mesh playerMesh;
 
-Player player;
+Mesh loadOBJ(const std::string& path){
+    Mesh mesh;
+    std::ifstream in(path);
+    if(!in.is_open()) return mesh;
 
-// -----------------------------------------
-// Obstacles & collectibles
-// -----------------------------------------
+    std::vector<Vec3s> vlist;
+    std::string line;
 
-struct Obstacle {
-    Vec3 pos;
-    Vec3 size;
-    GLuint texture;
-    bool harmful; // if true, collision decreases score
+    while(std::getline(in,line)){
+        if(line.size() < 2) continue;
+        std::istringstream iss(line);
+        std::string tag; iss >> tag;
 
-    AABB bounds() const {
-        return { Vec3(pos.x - size.x * 0.5f, 0.0f, pos.z - size.z * 0.5f),
-                 Vec3(pos.x + size.x * 0.5f, size.y, pos.z + size.z * 0.5f) };
-    }
-
-    void draw() const {
-        if (texture) {
-            glEnable(GL_TEXTURE_2D);
-            glBindTexture(GL_TEXTURE_2D, texture);
+        if(tag=="v"){
+            float x,y,z; iss>>x>>y>>z;
+            vlist.push_back({x,y,z});
         }
-        glColor3f(1.0f, 1.0f, 1.0f);
-        glPushMatrix();
-        glTranslatef(pos.x, pos.y, pos.z);
-        glScalef(size.x, size.y, size.z);
-        glutSolidCube(1.0);
-        glPopMatrix();
-        if (texture) glDisable(GL_TEXTURE_2D);
-    }
-};
+        else if(tag=="f"){
+            std::string w;
+            std::vector<std::string> f;
+            while(iss>>w) f.push_back(w);
 
-struct Collectible {
-    Vec3 pos;
-    float radius;
-    bool  collected;
-    GLuint texture;
-    float rotation; // animation
+            auto idx=[&](std::string s){
+                size_t p=s.find('/');
+                int i=(p==std::string::npos? stoi(s):stoi(s.substr(0,p)));
+                if(i<0) i = int(vlist.size())+1+i;
+                return i-1;
+            };
 
-    Collectible(Vec3 p = Vec3()) {
-        pos = p;
-        radius = 0.4f;
-        collected = false;
-        texture = 0;
-        rotation = 0.0f;
-    }
-
-    AABB bounds() const {
-        return { Vec3(pos.x - radius, pos.y - radius, pos.z - radius),
-                 Vec3(pos.x + radius, pos.y + radius, pos.z + radius) };
-    }
-
-    void update(float dt) {
-        rotation += 180.0f * dt; // spin animation
-        if (rotation > 360.0f) rotation -= 360.0f;
-    }
-
-    void draw() const {
-        if (collected) return;
-        glPushMatrix();
-        glTranslatef(pos.x, pos.y, pos.z);
-        glRotatef(rotation, 0.0f, 1.0f, 0.0f);
-        if (texture) {
-            glEnable(GL_TEXTURE_2D);
-            glBindTexture(GL_TEXTURE_2D, texture);
-        }
-        glColor3f(1.0f, 1.0f, 0.0f);
-        glutSolidTorus(0.1, 0.3, 16, 32); // placeholder "coin"
-        if (texture) glDisable(GL_TEXTURE_2D);
-        glPopMatrix();
-    }
-};
-
-std::vector<Obstacle>    obstacles;
-std::vector<Collectible> collectibles;
-
-// -----------------------------------------
-// Lighting
-// -----------------------------------------
-
-float lightAngle = 0.0f;
-bool  dynamicColor = true;
-
-void setupLights() {
-    glEnable(GL_LIGHTING);
-    glEnable(GL_LIGHT0);
-    glEnable(GL_LIGHT1);
-
-    // Light 0: main warm light
-    GLfloat ambient0[]  = {0.2f, 0.2f, 0.2f, 1.0f};
-    GLfloat diffuse0[]  = {0.9f, 0.7f, 0.6f, 1.0f};
-    GLfloat specular0[] = {1.0f, 0.9f, 0.8f, 1.0f};
-    glLightfv(GL_LIGHT0, GL_AMBIENT,  ambient0);
-    glLightfv(GL_LIGHT0, GL_DIFFUSE,  diffuse0);
-    glLightfv(GL_LIGHT0, GL_SPECULAR, specular0);
-
-    // Light 1: colored moving light
-    GLfloat ambient1[]  = {0.0f, 0.0f, 0.0f, 1.0f};
-    GLfloat diffuse1[]  = {0.0f, 0.6f, 1.0f, 1.0f};
-    GLfloat specular1[] = {0.0f, 0.8f, 1.0f, 1.0f};
-    glLightfv(GL_LIGHT1, GL_AMBIENT,  ambient1);
-    glLightfv(GL_LIGHT1, GL_DIFFUSE,  diffuse1);
-    glLightfv(GL_LIGHT1, GL_SPECULAR, specular1);
-}
-
-void updateLights(float dt) {
-    lightAngle += 20.0f * dt;
-    if (lightAngle > 360.0f) lightAngle -= 360.0f;
-    float radius = 10.0f;
-
-    GLfloat position1[] = {
-        (GLfloat)(radius * std::cos(lightAngle * (float)M_PI / 180.0f)),
-        5.0f,
-        (GLfloat)(radius * std::sin(lightAngle * (float)M_PI / 180.0f)),
-        1.0f
-    };
-    glLightfv(GL_LIGHT1, GL_POSITION, position1);
-
-    if (dynamicColor) {
-        float t = (std::sin(lightAngle * (float)M_PI / 180.0f) + 1.0f) * 0.5f;
-        GLfloat diffuse1[] = {t, 0.6f * (1.0f - t), 1.0f, 1.0f};
-        glLightfv(GL_LIGHT1, GL_DIFFUSE, diffuse1);
-    }
-
-    GLfloat position0[] = {0.0f, 10.0f, 0.0f, 1.0f};
-    glLightfv(GL_LIGHT0, GL_POSITION, position0);
-}
-
-// -----------------------------------------
-// Levels
-// -----------------------------------------
-
-GLuint texGround1 = 0, texGround2 = 0, texWall1 = 0, texWall2 = 0;
-
-void buildLevel(LevelID level) {
-    obstacles.clear();
-    collectibles.clear();
-
-    if (level == LEVEL_1) {
-        // Level 1
-        for (int i = -5; i <= 5; ++i) {
-            Obstacle wall;
-            wall.pos = Vec3(i * 2.0f, 1.0f, -10.0f);
-            wall.size = Vec3(1.5f, 2.0f, 1.0f);
-            wall.texture = texWall1;
-            wall.harmful = true;
-            obstacles.push_back(wall);
-        }
-
-        for (int i = 0; i < 5; ++i) {
-            Obstacle b;
-            b.pos = Vec3((i - 2) * 3.0f, 1.0f, (i - 1) * 3.0f);
-            b.size = Vec3(2.0f, 2.0f, 2.0f);
-            b.texture = texWall1;
-            b.harmful = true;
-            obstacles.push_back(b);
-        }
-
-        collectibles.emplace_back(Vec3(-4.0f, 1.0f, -5.0f));
-        collectibles.emplace_back(Vec3(0.0f,  1.0f, -8.0f));
-        collectibles.emplace_back(Vec3(4.0f,  1.0f, -2.0f));
-
-    } else {
-        // Level 2
-        for (int i = -5; i <= 5; ++i) {
-            Obstacle wall;
-            wall.pos = Vec3(-10.0f, 1.0f, i * 2.0f);
-            wall.size = Vec3(1.5f, 2.0f, 1.5f);
-            wall.texture = texWall2;
-            wall.harmful = true;
-            obstacles.push_back(wall);
-        }
-
-        for (int i = 0; i < 6; ++i) {
-            Obstacle pillar;
-            pillar.pos  = Vec3((i - 3) * 3.0f, 1.5f,
-                               (i % 2 == 0) ? -4.0f : 4.0f);
-            pillar.size = Vec3(1.5f, 3.0f, 1.5f);
-            pillar.texture = texWall2;
-            pillar.harmful = true;
-            obstacles.push_back(pillar);
-        }
-
-        collectibles.emplace_back(Vec3(-6.0f, 1.0f,  0.0f));
-        collectibles.emplace_back(Vec3( 0.0f, 1.0f,  6.0f));
-        collectibles.emplace_back(Vec3( 6.0f, 1.0f, -6.0f));
-        collectibles.emplace_back(Vec3( 3.0f, 1.0f,  3.0f));
-    }
-}
-
-// -----------------------------------------
-// Rendering helpers
-// -----------------------------------------
-
-void drawText(float x, float y, const char *str,
-              void *font = GLUT_BITMAP_HELVETICA_18) {
-    glMatrixMode(GL_PROJECTION);
-    glPushMatrix();
-    glLoadIdentity();
-    gluOrtho2D(0, windowWidth, 0, windowHeight);
-
-    glMatrixMode(GL_MODELVIEW);
-    glPushMatrix();
-    glLoadIdentity();
-
-    glDisable(GL_LIGHTING);
-    glColor3f(1.0f, 1.0f, 1.0f);
-    glRasterPos2f(x, y);
-
-    for (const char *c = str; *c != '\0'; ++c) {
-        glutBitmapCharacter(font, *c);
-    }
-    glEnable(GL_LIGHTING);
-
-    glPopMatrix();
-    glMatrixMode(GL_PROJECTION);
-    glPopMatrix();
-    glMatrixMode(GL_MODELVIEW);
-}
-
-void drawGround(LevelID level) {
-    GLuint tex = (level == LEVEL_1) ? texGround1 : texGround2;
-
-    glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, tex);
-    glColor3f(1.0f, 1.0f, 1.0f);
-
-    glNormal3f(0.0f, 1.0f, 0.0f);
-    glBegin(GL_QUADS);
-    glTexCoord2f(0.0f,  0.0f);  glVertex3f(-50.0f, 0.0f, -50.0f);
-    glTexCoord2f(10.0f, 0.0f);  glVertex3f( 50.0f, 0.0f, -50.0f);
-    glTexCoord2f(10.0f,10.0f);  glVertex3f( 50.0f, 0.0f,  50.0f);
-    glTexCoord2f(0.0f, 10.0f);  glVertex3f(-50.0f, 0.0f,  50.0f);
-    glEnd();
-
-    glDisable(GL_TEXTURE_2D);
-}
-
-// -----------------------------------------
-// Interaction logic
-// -----------------------------------------
-
-void handleCollisions() {
-    AABB playerBox = player.bounds();
-
-    for (auto &o : obstacles) {
-        if (intersects(playerBox, o.bounds())) {
-            if (o.harmful) {
-                score -= 10;
-                Vec3 dir = camera.front();
-                player.pos = player.pos - dir * 0.5f;
+            for(size_t i=1;i+1<f.size();i++){
+                mesh.verts.push_back(vlist[idx(f[0])]);
+                mesh.verts.push_back(vlist[idx(f[i])]);
+                mesh.verts.push_back(vlist[idx(f[i+1])]);
             }
         }
     }
+    return mesh;
+}
 
-    for (auto &c : collectibles) {
-        if (!c.collected && intersects(playerBox, c.bounds())) {
+// =======================================================
+// ENTITIES
+// =======================================================
+struct Collectible { Vec3 pos; float radius; bool collected; };
+struct Obstacle { Vec3 pos, vel; float radius, mass; std::string type; bool grounded; };
+struct Portal { Vec3 pos; float radius; };
+
+std::vector<Collectible> collectibles;
+std::vector<Obstacle> obstacles;
+Portal portal;
+
+// =======================================================
+// RANDOM POSITION GENERATOR
+// =======================================================
+Vec3 randomUniformPosition(float minDist){
+    while(true){
+        float x = frand(-WORLD_HALF+3, WORLD_HALF-3);
+        float z = frand(-WORLD_HALF+3, WORLD_HALF-3);
+
+        Vec3 p(x,0,z);
+        bool ok=true;
+
+        for(auto &c:collectibles)
+            if(len(Vec3{p.x-c.pos.x,0,p.z-c.pos.z})<minDist) ok=false;
+        for(auto &o:obstacles)
+            if(len(Vec3{p.x-o.pos.x,0,p.z-o.pos.z})<minDist) ok=false;
+
+        if(ok) return p;
+    }
+}
+// =======================================================
+// LEVEL SETUP
+// =======================================================
+
+void clearLevel(){
+    collectibles.clear();
+    obstacles.clear();
+    score = 0;
+}
+
+void setupDesert(){
+    clearLevel();
+    currentLevel = 1;
+
+    playerPos = Vec3(0,1.0f,5.0f);
+    lastSafePos = playerPos;
+    playerYaw = cameraYaw = 0.0f;
+    cameraPitch = 0.0f;
+
+    int COLLECT_COUNT = 10;
+    int OBST_COUNT    = 8;
+
+    for(int i=0;i<COLLECT_COUNT;i++){
+        Vec3 p = randomUniformPosition(4.5f);
+        collectibles.push_back({ Vec3(p.x,1.4f,p.z), 0.6f, false });
+    }
+
+    for(int i=0;i<OBST_COUNT;i++){
+        Vec3 p = randomUniformPosition(6.5f);
+        obstacles.push_back({
+            Vec3(p.x,1.0f,p.z),
+            Vec3(0,0,0),
+            1.1f,
+            9999.0f,
+            "stone",
+            true
+        });
+    }
+
+    portal.pos = Vec3(0,0,-(WORLD_HALF - 4.0f));
+    portal.radius = 2.8f;
+}
+
+void setupSnow(){
+    clearLevel();
+    currentLevel = 2;
+
+    playerPos = Vec3(0,1.0f,5.0f);
+    lastSafePos = playerPos;
+    playerYaw = cameraYaw = 0.0f;
+    cameraPitch = 0.0f;
+
+    int COLLECT_COUNT = 10;
+    int OBST_COUNT    = 9;
+
+    for(int i=0;i<COLLECT_COUNT;i++){
+        Vec3 p = randomUniformPosition(4.5f);
+        collectibles.push_back({ Vec3(p.x,1.8f,p.z), 0.6f, false });
+    }
+
+    for(int i=0;i<OBST_COUNT;i++){
+        Vec3 p = randomUniformPosition(6.5f);
+        obstacles.push_back({
+            Vec3(p.x, 14.0f + frand(-1.5f,1.5f), p.z),
+            Vec3(0,0,0),
+            0.5f,
+            0.8f,
+            "icicle",
+            false
+        });
+    }
+
+    portal.pos = Vec3(0,0,-(WORLD_HALF - 4.0f));
+    portal.radius = 2.8f;
+}
+
+// =======================================================
+// DRAW ENVIRONMENT (Walls + Floor Textured by Level)
+// =======================================================
+
+void drawGroundAndEnvironment(){
+    float half = WORLD_HALF;
+    float h    = WALL_HEIGHT;
+
+    // Background sky color
+    if(currentLevel == 1)
+        glClearColor(0.96f, 0.90f, 0.75f, 1.0f);
+    else
+        glClearColor(0.68f, 0.82f, 0.98f, 1.0f);
+
+    // ======================================================
+    // FLOOR TEXTURES — NEW FEATURE
+    // ======================================================
+
+    if(currentLevel == 1){
+        glBindTexture(GL_TEXTURE_2D, desertFloorTex);
+        glColor3f(1,1,1);
+    }
+    else if(currentLevel == 2){
+        glBindTexture(GL_TEXTURE_2D, snowFloorTex);
+        glColor3f(1,1,1);
+    }
+    else{
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glColor3f(1,1,1);
+    }
+
+    float floorRepeat = 10.0f;
+
+    glBegin(GL_QUADS);
+        glNormal3f(0,1,0);
+        glTexCoord2f(0,0);                    glVertex3f(-half,0,-half);
+        glTexCoord2f(floorRepeat,0);          glVertex3f( half,0,-half);
+        glTexCoord2f(floorRepeat,floorRepeat); glVertex3f( half,0, half);
+        glTexCoord2f(0,floorRepeat);          glVertex3f(-half,0, half);
+    glEnd();
+
+    // ======================================================
+    // WALL TEXTURES
+    // ======================================================
+    if(currentLevel == 1){
+        glBindTexture(GL_TEXTURE_2D, desertWallTex);
+        glColor3f(1,1,1);
+    }
+    else if(currentLevel == 2){
+        glBindTexture(GL_TEXTURE_2D, snowWallTex);
+        glColor3f(1,1,1);
+    }
+    else {
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glColor3f(1,1,1);
+    }
+
+    float repeat = 4.0f;
+
+    // +Z wall
+    glBegin(GL_QUADS);
+        glNormal3f(0,0,-1);
+        glTexCoord2f(0,0);           glVertex3f(-half,0, half);
+        glTexCoord2f(repeat,0);      glVertex3f( half,0, half);
+        glTexCoord2f(repeat,repeat); glVertex3f( half,h, half);
+        glTexCoord2f(0,repeat);      glVertex3f(-half,h, half);
+    glEnd();
+
+    // -Z wall
+    glBegin(GL_QUADS);
+        glNormal3f(0,0,1);
+        glTexCoord2f(0,0);           glVertex3f(-half,0,-half);
+        glTexCoord2f(0,repeat);      glVertex3f(-half,h,-half);
+        glTexCoord2f(repeat,repeat); glVertex3f( half,h,-half);
+        glTexCoord2f(repeat,0);      glVertex3f( half,0,-half);
+    glEnd();
+
+    // -X wall
+    glBegin(GL_QUADS);
+        glNormal3f(1,0,0);
+        glTexCoord2f(0,0);           glVertex3f(-half,0,-half);
+        glTexCoord2f(repeat,0);      glVertex3f(-half,0, half);
+        glTexCoord2f(repeat,repeat); glVertex3f(-half,h, half);
+        glTexCoord2f(0,repeat);      glVertex3f(-half,h,-half);
+    glEnd();
+
+    // +X wall
+    glBegin(GL_QUADS);
+        glNormal3f(-1,0,0);
+        glTexCoord2f(0,0);           glVertex3f(half,0,-half);
+        glTexCoord2f(repeat,0);      glVertex3f(half,0, half);
+        glTexCoord2f(repeat,repeat); glVertex3f(half,h, half);
+        glTexCoord2f(0,repeat);      glVertex3f(half,h,-half);
+    glEnd();
+
+    // ROOF (no texture)
+    glBindTexture(GL_TEXTURE_2D, 0);
+    if(currentLevel == 1) glColor3f(0.75f,0.65f,0.45f);
+    else                  glColor3f(0.88f,0.93f,0.98f);
+
+    glBegin(GL_QUADS);
+        glNormal3f(0,-1,0);
+        glVertex3f(-half,h,-half);
+        glVertex3f( half,h,-half);
+        glVertex3f( half,h, half);
+        glVertex3f(-half,h, half);
+    glEnd();
+}
+
+// =======================================================
+// PLAYER MODEL
+// =======================================================
+
+void drawPlayerModel(){
+    if(!playerMesh.empty()){
+        glPushMatrix();
+        glScalef(0.5f,0.5f,0.5f);
+        glBegin(GL_TRIANGLES);
+        for(const auto& v : playerMesh.verts)
+            glVertex3f(v.x, v.y, v.z);
+        glEnd();
+        glPopMatrix();
+    } else {
+        glPushMatrix();
+        glColor3f(0.9f,0.6f,0.4f);
+        glTranslatef(0,0.65f,0);
+        glutSolidSphere(0.28f,16,12);
+        glPopMatrix();
+
+        glPushMatrix();
+        glColor3f(0.7f,0.3f,0.2f);
+        glTranslatef(0,0.1f,0);
+        glScalef(0.6f,0.9f,0.35f);
+        glutSolidCube(1.0f);
+        glPopMatrix();
+    }
+}
+
+// =======================================================
+// PORTAL
+// =======================================================
+
+void drawPortal(){
+    glPushMatrix();
+    glTranslatef(portal.pos.x, portal.pos.y + 1.2f, portal.pos.z);
+
+    float t = glutGet(GLUT_ELAPSED_TIME) * 0.05f;
+
+    if(currentLevel == 1){
+        glPushMatrix();
+        glColor3f(1.0f,0.85f,0.35f);
+        glRotatef(90,0,1,0);
+        glScalef(1.4f,2.3f,0.4f);
+        glutSolidTorus(0.22f,1.32f,28,28);
+        glPopMatrix();
+
+        glColor3f(1.0f,0.55f,0.15f);
+        glRotatef(t,0,1,0);
+        glutSolidTorus(0.11f,0.99f,24,24);
+    }
+    else {
+        glPushMatrix();
+        glColor3f(0.80f,0.90f,1.0f);
+        glRotatef(90,0,1,0);
+        glScalef(1.6f,2.5f,0.4f);
+        glutSolidTorus(0.198f,1.21f,28,28);
+        glPopMatrix();
+
+        glColor3f(0.55f,0.80f,1.0f);
+        glRotatef(-t,0,1,0);
+        glutSolidTorus(0.132f,0.935f,24,24);
+    }
+
+    glPopMatrix();
+}
+
+// =======================================================
+// OBSTACLE PHYSICS
+// =======================================================
+
+void integrateObstacles(float dt){
+    for(auto& o : obstacles){
+        if(o.type == "icicle" && !o.grounded){
+            const float slowG = -4.2f;
+            o.vel.y += slowG * dt;
+            o.pos.y += o.vel.y * dt;
+
+            if(o.pos.y <= 0.35f){
+                o.pos.y = 0.35f;
+                o.vel.y = 0.0f;
+                o.grounded = true;
+            }
+        }
+    }
+}
+
+// =======================================================
+// COLLISION
+// =======================================================
+
+float distXZ(const Vec3& a,const Vec3& b){
+    float dx = a.x - b.x;
+    float dz = a.z - b.z;
+    return std::sqrt(dx*dx + dz*dz);
+}
+
+void handlePlayerCollisions(){
+    bool pushedBack = false;
+    
+    for(auto& o : obstacles){
+        float d = distXZ(playerPos, o.pos);
+        float minD = playerRadius + o.radius;
+
+        if(d < minD){
+            float dx = playerPos.x - o.pos.x;
+            float dz = playerPos.z - o.pos.z;
+            float L = std::sqrt(dx*dx + dz*dz);
+            if(L < 0.0001f) L = 0.0001f;
+
+            float overlap = minD - L;
+            playerPos.x += (dx/L) * overlap;
+            playerPos.z += (dz/L) * overlap;
+
+            score = std::max(0, score - 1);
+            pushedBack = true;
+        }
+    }
+
+    if(pushedBack){
+        for(auto& o : obstacles){
+            if(distXZ(playerPos, o.pos) < o.radius + playerRadius - 0.01f){
+                playerPos = lastSafePos;
+                break;
+            }
+        }
+    }
+}
+// =======================================================
+// UPDATE LOOP
+// =======================================================
+
+void update(float dt){
+    lastSafePos = playerPos;
+
+    Vec3 input(0,0,0);
+    if(keys['w']||keys['W']) input.z += 1;
+    if(keys['s']||keys['S']) input.z -= 1;
+    if(keys['a']||keys['A']) input.x -= 1;
+    if(keys['d']||keys['D']) input.x += 1;
+
+    if(input.x != 0 || input.z != 0){
+        float L = std::sqrt(input.x*input.x + input.z*input.z);
+        input.x /= L; input.z /= L;
+
+        float sy = std::sin(playerYaw);
+        float cy = std::cos(playerYaw);
+
+        Vec3 forward(sy, 0, -cy);
+        Vec3 right (cy, 0,  sy);
+
+        playerPos.x += (forward.x * input.z + right.x * input.x) * playerSpeed * dt;
+        playerPos.z += (forward.z * input.z + right.z * input.x) * playerSpeed * dt;
+    }
+
+    playerPos.y = 1.0f;
+
+    integrateObstacles(dt);
+    handlePlayerCollisions();
+
+    // Collectibles pickup
+    for(auto& c : collectibles){
+        if(!c.collected && distXZ(playerPos, c.pos) < c.radius + playerRadius + 0.15f){
             c.collected = true;
-            score += 50;
-            printf("Collected! Score = %d\n", score);
-            // system("afplay coin.wav &"); // optional sound
+            score += 10;
         }
     }
 
     bool allCollected = true;
-    for (const auto &c : collectibles) {
-        if (!c.collected) {
-            allCollected = false;
-            break;
-        }
+    for(auto& c : collectibles) if(!c.collected) allCollected = false;
+
+    // Portal to switch levels
+    if(allCollected && distXZ(playerPos, portal.pos) < portal.radius + 0.8f){
+        if(currentLevel == 1) setupSnow();
+        else setupDesert();
     }
-    if (allCollected) {
-        gameOver = true;
-    }
+
+    // Arena boundaries
+    float bound = WORLD_HALF - playerRadius - 0.1f;
+    playerPos.x = clampf(playerPos.x, -bound, bound);
+    playerPos.z = clampf(playerPos.z, -bound, bound);
 }
 
-// -----------------------------------------
-// Game update
-// -----------------------------------------
-void updateGame(float dt) {
-    // -----------------------------
-    // Movement relative to camera
-    // -----------------------------
-    Vec3 move(0.0f, 0.0f, 0.0f);
-    Vec3 front = camera.front();
-    Vec3 right = camera.right();
+// =======================================================
+// RENDER
+// =======================================================
 
-    // ignore vertical tilt for movement
-    front.y = 0.0f;
-    right.y = 0.0f;
-
-    if (keyStates['w'] || keyStates['W']) move = move + front;
-    if (keyStates['s'] || keyStates['S']) move = move - front;
-    if (keyStates['a'] || keyStates['A']) move = move - right;
-    if (keyStates['d'] || keyStates['D']) move = move + right;
-
-    if (move.x != 0.0f || move.z != 0.0f) {
-        float len = std::sqrt(move.x * move.x + move.z * move.z);
-        move.x /= len;
-        move.z /= len;
-        player.pos = player.pos + move * (player.speed * dt);
-
-        // update player rotation to face movement direction
-        player.heading = std::atan2(move.z, move.x) * 180.0f / (float)M_PI - 90.0f;
-    }
-
-    // -----------------------------
-    // Camera position
-    // -----------------------------
-    Vec3 playerCenter(player.pos.x,
-                      player.pos.y + 1.2f, // head/center height
-                      player.pos.z);
-
-    if (firstPerson) {
-        // First-person: camera at player head
-        camera.pos = playerCenter;
-    } else {
-        // Third-person: orbit camera behind player
-
-        float distance = 5.0f;   // how far behind
-        float ry = camera.yaw   * (float)M_PI / 180.0f;
-        float rp = camera.pitch * (float)M_PI / 180.0f;
-
-        // Clamp pitch for 3rd person so camera never goes crazy
-        const float maxPitch = 45.0f * (float)M_PI / 180.0f;
-        const float minPitch = -20.0f * (float)M_PI / 180.0f;
-        if (rp > maxPitch) rp = maxPitch;
-        if (rp < minPitch) rp = minPitch;
-
-        // Spherical coordinates around player
-        float offsetX = distance * std::cos(rp) * std::cos(ry);
-        float offsetY = distance * std::sin(rp);
-        float offsetZ = distance * std::cos(rp) * std::sin(ry);
-
-        // camera is behind the player (center - offset)
-        camera.pos = Vec3(
-            playerCenter.x - offsetX,
-            playerCenter.y - offsetY,
-            playerCenter.z - offsetZ
-        );
-    }
-
-    // -----------------------------
-    // Update collectibles animation
-    // -----------------------------
-    for (auto &c : collectibles) {
-        c.update(dt);
-    }
-
-    // -----------------------------
-    // Collision handling
-    // -----------------------------
-    handleCollisions();
-}
-
-// -----------------------------------------
-// GLUT callbacks
-// -----------------------------------------
-void displayCallback() {
+void renderScene(){
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glEnable(GL_DEPTH_TEST);
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    gluPerspective(60.0f, float(screenW)/float(screenH), 0.1f, 300.0f);
+
+    glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
 
-    if (firstPerson) {
-        // FPS: use yaw + pitch
-        camera.apply();
-    } else {
-        // Third-person: always look at player from camera.pos
-        Vec3 target(player.pos.x,
-                    player.pos.y + 1.2f,
-                    player.pos.z);
+    // Camera
+    if(cameraMode == CAM_FIRST){
+        Vec3 eye(playerPos.x, playerPos.y+0.8f, playerPos.z);
+        float sy = std::sin(cameraYaw), cy = std::cos(cameraYaw);
+        float lookX = sy * std::cos(cameraPitch);
+        float lookY = std::sin(cameraPitch);
+        float lookZ = -cy * std::cos(cameraPitch);
 
-        gluLookAt(
-            camera.pos.x, camera.pos.y, camera.pos.z,
-            target.x,     target.y,     target.z,
-            0.0f, 1.0f, 0.0f
-        );
+        gluLookAt(eye.x,eye.y,eye.z,
+                  eye.x+lookX,eye.y+lookY,eye.z+lookZ,
+                  0,1,0);
+    }
+    else {
+        float dist = 6.0f;
+        float h = 2.2f;
+        float sy = std::sin(playerYaw);
+        float cy = std::cos(playerYaw);
+        Vec3 forward(sy,0,-cy);
+        Vec3 cam(playerPos.x - forward.x*dist,
+                 playerPos.y + h,
+                 playerPos.z - forward.z*dist);
+
+        gluLookAt(cam.x,cam.y,cam.z,
+                  playerPos.x,playerPos.y+0.6f,playerPos.z,
+                  0,1,0);
     }
 
-    updateLights(deltaTime);
-    // (rest of your drawing code exactly the same)
-    drawGround(currentLevel);
+    // Lighting
+    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHT0);
+    glEnable(GL_LIGHT1);
 
-    for (const auto &o : obstacles)    o.draw();
-    for (const auto &c : collectibles) c.draw();
-
-    player.draw();
-
-    char hud[128];
-    std::snprintf(hud, sizeof(hud),
-                  "Score: %d   Level: %d   Camera: %s",
-                  score,
-                  (currentLevel == LEVEL_1 ? 1 : 2),
-                  (firstPerson ? "First" : "Third"));
-    drawText(10.0f, windowHeight - 25.0f, hud);
-
-    if (gameOver) {
-        drawText(windowWidth / 2.0f - 80.0f,
-                 windowHeight / 2.0f,
-                 "LEVEL COMPLETE!");
+    if(currentLevel == 1){
+        float sun[]  = {18,45,12,1};
+        float diff[] = {1.0,0.92,0.70,1};
+        float spec[] = {1.0,0.95,0.75,1};
+        float amb[]  = {0.35,0.28,0.20,1};
+        glLightfv(GL_LIGHT0, GL_POSITION, sun);
+        glLightfv(GL_LIGHT0, GL_DIFFUSE, diff);
+        glLightfv(GL_LIGHT0, GL_SPECULAR,spec);
+        glLightfv(GL_LIGHT0, GL_AMBIENT, amb);
     }
+    else {
+        float sun[]  = {12,50,18,1};
+        float diff[] = {0.75,0.85,1.0,1};
+        float spec[] = {0.85,0.90,1.0,1};
+        float amb[]  = {0.32,0.36,0.45,1};
+        glLightfv(GL_LIGHT0, GL_POSITION, sun);
+        glLightfv(GL_LIGHT0, GL_DIFFUSE, diff);
+        glLightfv(GL_LIGHT0, GL_SPECULAR,spec);
+        glLightfv(GL_LIGHT0, GL_AMBIENT, amb);
+    }
+
+    // Draw world
+    drawGroundAndEnvironment();
+    drawPortal();
+
+    // Obstacles
+    for(auto& o : obstacles){
+        glPushMatrix();
+        glTranslatef(o.pos.x, o.pos.y, o.pos.z);
+        if(o.type == "stone"){
+            glColor3f(0.42f,0.36f,0.31f);
+            glutSolidSphere(o.radius,28,20);
+        }
+        else {
+            glColor3f(0.92f,0.97f,1.0f);
+            glRotatef(-90,1,0,0);
+            glutSolidCone(0.45f,1.8f,18,6);
+        }
+        glPopMatrix();
+    }
+
+    // Collectibles
+    float t = glutGet(GLUT_ELAPSED_TIME)/1000.0f;
+    for(size_t i=0;i<collectibles.size();i++){
+        auto& c = collectibles[i];
+        if(!c.collected){
+            float bob = std::sin(t*2 + i)*0.25f;
+            glPushMatrix();
+            glTranslatef(c.pos.x, c.pos.y + bob, c.pos.z);
+            glRotatef(t*60 + i*20, 0,1,0);
+            if(currentLevel == 1) glColor3f(1.0,0.85,0.10);
+            else                  glColor3f(0.55,0.85,1.0);
+            glutSolidOctahedron();
+            glPopMatrix();
+        }
+    }
+
+    // Player (only in third-person)
+    if(cameraMode == CAM_THIRD){
+        glPushMatrix();
+        glTranslatef(playerPos.x, playerPos.y, playerPos.z);
+        glRotatef(playerYaw * 57.2958f, 0,1,0);
+        drawPlayerModel();
+        glPopMatrix();
+    }
+
+    // HUD
+    glDisable(GL_LIGHTING);
+    glDisable(GL_DEPTH_TEST);
+
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    gluOrtho2D(0,screenW,0,screenH);
+
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    glColor3f(1,1,1);
+
+    std::string title = (currentLevel==1 ? "DESERT TEMPLE RUINS" : "FROZEN CAVES (SNOW)");
+    glRasterPos2f(20,screenH-34);
+    for(char c : title) glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18,c);
+
+    std::string sc = "Score: " + std::to_string(score);
+    glRasterPos2f(20,screenH-58);
+    for(char c : sc) glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18,c);
+
+    int collectedCount = 0;
+    for(auto& c : collectibles) if(c.collected) collectedCount++;
+    std::string col = "Collected: " + std::to_string(collectedCount) + "/" + std::to_string(collectibles.size());
+    glRasterPos2f(200,screenH-58);
+    for(char c : col) glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18,c);
+
+    std::string help = "WASD move | Mouse look | C camera | L switch level | R reset";
+    glRasterPos2f(20,18);
+    for(char c : help) glutBitmapCharacter(GLUT_BITMAP_HELVETICA_12,c);
+
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+    glEnable(GL_DEPTH_TEST);
 
     glutSwapBuffers();
 }
 
-void reshapeCallback(int w, int h) {
-    windowWidth  = w;
-    windowHeight = (h == 0) ? 1 : h;
+// =======================================================
+// INPUT
+// =======================================================
 
-    glViewport(0, 0, windowWidth, windowHeight);
-
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    gluPerspective(60.0, (double)windowWidth / (double)windowHeight,
-                   0.1, 200.0);
-    glMatrixMode(GL_MODELVIEW);
+void reshape(int w,int h){
+    screenW = w;
+    screenH = h;
+    glViewport(0,0,w,h);
 }
 
-void keyboardDownCallback(unsigned char key, int, int) {
-    keyStates[key] = true;
+void onKeyDown(unsigned char key,int,int){
+    keys[key] = true;
 
-    if (key == 27) { // ESC
-        std::exit(0);
+    if(key == 27) exit(0);
+
+    if(key=='c' || key=='C'){
+        cameraMode = (cameraMode==CAM_FIRST ? CAM_THIRD : CAM_FIRST);
+        cameraYaw = playerYaw;
     }
 
-    if (key == '1') {
-        firstPerson = true;
-    } else if (key == '3') {
-        firstPerson = false;
-    } else if (key == 'l' || key == 'L') {
-        currentLevel = (currentLevel == LEVEL_1) ? LEVEL_2 : LEVEL_1;
-        buildLevel(currentLevel);
-        gameOver = false;
-    } else if (key == 'r' || key == 'R') {
-        score = 0;
-        player = Player();
-        buildLevel(currentLevel);
-        gameOver = false;
+    if(key=='l' || key=='L'){
+        if(currentLevel == 1) setupSnow();
+        else setupDesert();
+    }
+
+    if(key=='r' || key=='R'){
+        if(currentLevel == 1) setupDesert();
+        else setupSnow();
     }
 }
 
-void keyboardUpCallback(unsigned char key, int, int) {
-    keyStates[key] = false;
+void onKeyUp(unsigned char key,int,int){
+    keys[key] = false;
 }
 
-void mouseMotionCallback(int x, int y) {
-    if (firstMouse) {
-        lastMouseX = (float)x;
-        lastMouseY = (float)y;
-        firstMouse = false;
+bool firstMouse = true;
+int lastMouseX = 1280/2;
+int lastMouseY = 800/2;
+
+void onMouseMove(int x,int y){
+    if(firstMouse){
+        lastMouseX=x;
+        lastMouseY=y;
+        firstMouse=false;
+        return;
     }
 
-    float xoffset = (float)x - lastMouseX;
-    float yoffset = lastMouseY - (float)y;
-    lastMouseX    = (float)x;
-    lastMouseY    = (float)y;
+    int dx = x - lastMouseX;
+    int dy = y - lastMouseY;
 
-    float sensitivity = 0.1f;
-    xoffset *= sensitivity;
-    yoffset *= sensitivity;
+    lastMouseX = x;
+    lastMouseY = y;
 
-    camera.yaw   += xoffset;
-    camera.pitch += yoffset;
+    float sens = 0.0045f;
 
-    if (camera.pitch > 89.0f)  camera.pitch = 89.0f;
-    if (camera.pitch < -89.0f) camera.pitch = -89.0f;
+    playerYaw += dx * sens;
+    cameraYaw  = playerYaw;
+
+    cameraPitch -= dy * sens;
+    cameraPitch = clampf(cameraPitch, -1.2f, 1.2f);
 }
 
-void idleCallback() {
-    static int prevTime = glutGet(GLUT_ELAPSED_TIME);
-    int currentTime = glutGet(GLUT_ELAPSED_TIME);
-    int elapsed = currentTime - prevTime;
-    prevTime = currentTime;
-    deltaTime = elapsed / 1000.0f;
+// =======================================================
+// IDLE LOOP
+// =======================================================
 
-    updateGame(deltaTime);
+void idle(){
+    float t = glutGet(GLUT_ELAPSED_TIME)/1000.0f;
+    float dt = (lastTime==0 ? 1.0f/60.0f : (t-lastTime));
+    lastTime = t;
+
+    update(dt);
     glutPostRedisplay();
 }
 
-// -----------------------------------------
-// OpenGL/GLUT initialization
-// -----------------------------------------
+// =======================================================
+// MAIN
+// =======================================================
 
-void initGL() {
-    FILE *f = fopen("boy_02.obj", "r");
-    if (!f) printf("FILE NOT FOUND AT RUNTIME!\n");
-    else { printf("FILE FOUND!\n"); fclose(f); }
+int main(int argc,char** argv){
+    srand((unsigned)time(nullptr));
 
-    
-    playerModel.load("boy_02.obj");
-   // <-- your filename
+    playerMesh = loadOBJ("player.obj");
+    if(!playerMesh.empty())
+        std::cout << "Loaded player.obj\n";
+    else
+        std::cout << "Fallback player model used.\n";
 
-    
+    setupDesert();
+
+    glutInit(&argc,argv);
+    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_DEPTH);
+    glutInitWindowSize(screenW,screenH);
+    glutCreateWindow("GLUT Game — Textured Desert & Snow");
+
     glEnable(GL_DEPTH_TEST);
-    glEnable(GL_NORMALIZE);
     glShadeModel(GL_SMOOTH);
-
-    glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
-
-    setupLights();
-
-    GLfloat mat_ambient[]  = {0.3f, 0.3f, 0.3f, 1.0f};
-    GLfloat mat_diffuse[]  = {0.8f, 0.8f, 0.8f, 1.0f};
-    GLfloat mat_specular[] = {0.9f, 0.9f, 0.9f, 1.0f};
-    GLfloat mat_shininess  = 50.0f;
-    glMaterialfv(GL_FRONT, GL_AMBIENT,   mat_ambient);
-    glMaterialfv(GL_FRONT, GL_DIFFUSE,   mat_diffuse);
-    glMaterialfv(GL_FRONT, GL_SPECULAR,  mat_specular);
-    glMaterialf (GL_FRONT, GL_SHININESS, mat_shininess);
-
     glEnable(GL_TEXTURE_2D);
 
-    texGround1 = loadBMPTexture("ground1.bmp");
-    texGround2 = loadBMPTexture("ground2.bmp");
-    texWall1   = loadBMPTexture("wall1.bmp");
-    texWall2   = loadBMPTexture("wall2.bmp");
+    // LOAD ALL TEXTURES
+    desertWallTex   = loadBMP("rock_boulder_cracked_diff_4k.bmp");
+    snowWallTex     = loadBMP("jersey_melange_diff_4k.bmp");
+    desertFloorTex  = loadBMP("Ground095A_4K-JPG_Color.bmp");
+    snowFloorTex    = loadBMP("Snow008A_4K-JPG_Color.bmp");
 
-    buildLevel(currentLevel);
-    if (!playerModel.load("Assets/Models/boy_02.obj")) {
-        printf("MODEL FAILED TO LOAD!!\n");
-    } else {
-        printf("MODEL LOADED SUCCESSFULLY!\n");
-    }
-
-}
-
-// -----------------------------------------
-// main
-// -----------------------------------------
-
-int main(int argc, char **argv) {
-    std::memset(keyStates, 0, sizeof(keyStates));
-
-    glutInit(&argc, argv);
-    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
-    glutInitWindowSize(windowWidth, windowHeight);
-    glutCreateWindow("DMET 502 - 3D Game Project");
-
-    initGL();
-
-    glutDisplayFunc(displayCallback);
-    glutReshapeFunc(reshapeCallback);
-    glutKeyboardFunc(keyboardDownCallback);
-    glutKeyboardUpFunc(keyboardUpCallback);
-    glutPassiveMotionFunc(mouseMotionCallback);
-    glutIdleFunc(idleCallback);
-
-    glutSetCursor(GLUT_CURSOR_NONE); // optional
+    glutDisplayFunc(renderScene);
+    glutReshapeFunc(reshape);
+    glutKeyboardFunc(onKeyDown);
+    glutKeyboardUpFunc(onKeyUp);
+    glutPassiveMotionFunc(onMouseMove);
+    glutMotionFunc(onMouseMove);
+    glutIdleFunc(idle);
 
     glutMainLoop();
     return 0;
