@@ -1209,13 +1209,13 @@ int main(int argc,char** argv){
     desertGoldTex   = loadBMP("Metal042B.bmp");
     if(desertGoldTex) std::cout << "  ✓ Desert gold texture loaded\n";
     
-    roofTex = loadBMP("stone_wall_diff_4k.bmp");
+    roofTex = loadBMP("large_sandstone_blocks_01_diff_4k.bmp");
     if(roofTex) std::cout << "  ✓ Roof texture loaded\n";
     
     fireSpiritTex = loadBMP("ChristmasTreeOrnament014_4K-JPG_Color.bmp");
     if(fireSpiritTex) std::cout << "  ✓ Fire spirit texture loaded\n";
     
-    portalTex = loadBMP("medieval_blocks_02_diff_4k.bmp");
+    portalTex = loadBMP("large_sandstone_blocks_01_diff_4k.bmp");
     if(portalTex) std::cout << "  ✓ Portal texture loaded\n";
     
     std::cout << "\n✨ All textures loaded successfully!\n\n";
